@@ -128,7 +128,6 @@ def main():
     p2, p98 = np.percentile(filtered_data, (1, 99))
     filtered_rescaled_data = exposure.rescale_intensity(filtered_data, in_range=(p2, p98))
 
-    print "%s - %s" % (str(filtered_data.shape), str(filtered_data.dtype))
     filtered_data.tofile(r"/Users/rshkarin/Documents/AllaData/filtered_afm_data_16bit_512x512.raw")
     filtered_rescaled_data.tofile(r"/Users/rshkarin/Documents/AllaData/filtered_rescaled_afm_data_16bit_512x512.raw")
 
