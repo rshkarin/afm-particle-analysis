@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from skimage import exposure
 
 def next_length_pow2(x):
     return 2 ** np.ceil(np.log2(abs(x)))
@@ -33,42 +34,75 @@ def filter(fft_data, filter_large_dia, filter_small_dia):
 
             factor = (1 - row_fact_large*col_fact_large) * row_fact_small*col_fact_small
 
-            fft_data[]
+            fft_data[col+row] = fft_data[col+row] * factor
+            fft_data[col+backrow] = fft_data[col+backrow] * factor
+            fft_data[backcol+row] = fft_data[backcol+row] * factor
+            fft_data[backcol+backrow] = fft_data[backcol+backrow] * factor
 
-	for (int j=1; j<maxN/2; j++) {
-			row = j * maxN;
-			backrow = (maxN-j)*maxN;
-			rowFactLarge = (float) Math.exp(-(j*j) * scaleLarge);
-			rowFactSmall = (float) Math.exp(-(j*j) * scaleSmall);
-
-
-			// loop over columns
-			for (col=1; col<maxN/2; col++){
-				backcol = maxN-col;
-				colFactLarge = (float) Math.exp(- (col*col) * scaleLarge);
-				colFactSmall = (float) Math.exp(- (col*col) * scaleSmall);
-				factor = (1 - rowFactLarge*colFactLarge) * rowFactSmall*colFactSmall;
-				switch (stripesHorVert) {
-					case 1: factor *= (1 - (float) Math.exp(- (col*col) * scaleStripes)); break;// hor stripes
-					case 2: factor *= (1 - (float) Math.exp(- (j*j) * scaleStripes)); // vert stripes
-				}
-
-				fht[col+row] *= factor;
-				fht[col+backrow] *= factor;
-				fht[backcol+row] *= factor;
-				fht[backcol+backrow] *= factor;
-				filter[col+row] *= factor;
-				filter[col+backrow] *= factor;
-				filter[backcol+row] *= factor;
-				filter[backcol+backrow] *= factor;
-			}
-		}
+            filter_data[col+row] = filter_data[col+row] * factor
+            filter_data[col+backrow] = filter_data[col+backrow] * factor
+            filter_data[backcol+row] = filter_data[backcol+row] * factor
+            filter_data[backcol+backrow] = filter_data[backcol+backrow] * factor
 
 
+    #process meeting points (maxN/2,0) , (0,maxN/2), and (maxN/2,maxN/2)
+	rowmid = side_len * (side_len/2)
+	row_fact_large = np.exp(- (side_len/2)*(side_len/2) * scale_large)
+	row_fact_small = np.exp(- (side_len/2)*(side_len/2) * scale_small)
 
+	fft_data[side_len/2] = fft_data[side_len/2] * (1 - row_fact_large) * row_fact_small
+	fft_data[rowmid] = fft_data[rowmid] * (1 - row_fact_large) * row_fact_small
+	fft_data[side_len/2 + rowmid] = fft_data[side_len/2 + rowmid] * (1 - row_fact_large * row_fact_large) * row_fact_small * row_fact_small
+
+    filter_data[side_len/2] = filter_data[side_len/2] * (1 - row_fact_large) * row_fact_small
+    filter_data[rowmid] = filter_data[rowmid] * (1 - row_fact_large) * row_fact_small
+    filter_data[side_len/2 + rowmid] = filter_data[side_len/2 + rowmid] * (1 - row_fact_large * row_fact_large) * row_fact_small * row_fact_small
+
+    #loop along row 0 and side_len/2
+    row_fact_large = np.exp(- (side_len/2)*(side_len/2) * scale_large)
+    row_fact_small = np.exp(- (side_len/2)*(side_len/2) * scale_small)
+
+    for col in np.arange(1, side_len/2):
+        backcol = side_len - col
+        col_fact_large = np.exp(- (col*col) * scale_large)
+        col_fact_small = np.exp(- (col*col) * scale_small)
+
+        fft_data[col] = fft_data[col] * (1 - col_fact_large) * col_fact_small
+        fft_data[backcol] = fft_data[backcol] * (1 - col_fact_large) * col_fact_small
+        fft_data[col+rowmid] = fft_data[col+rowmid] * (1 - col_fact_large*row_fact_large) * col_fact_small*row_fact_small
+        fft_data[backcol+rowmid] = fft_data[backcol+rowmid] * (1 - col_fact_large*row_fact_large) * col_fact_small*row_fact_small
+        filter_data[col] = filter_data[col] * (1 - col_fact_large) * col_fact_small
+        filter_data[backcol] = filter_data[backcol] * (1 - col_fact_large) * col_fact_small
+        filter_data[col+rowmid] = filter_data[col+rowmid] * (1 - col_fact_large*row_fact_large) * col_fact_small*row_fact_small
+        filter_data[backcol+rowmid] = filter_data[backcol+rowmid] * (1 - col_fact_large*row_fact_large) * col_fact_small*row_fact_small
+
+    #loop along column 0 and side_len/2
+    col_fact_large = np.exp(- (side_len/2)*(side_len/2) * scale_large)
+    col_fact_small = np.exp(- (side_len/2)*(side_len/2) * scale_small)
+
+    for j in np.arange(1, side_len/2):
+        row = j * side_len
+        backrow = (side_len - j) * side_len
+
+        row_fact_large = np.exp(- (j*j) * scale_large)
+        row_fact_small = np.exp(- (j*j) * scale_small)
+
+        fft_data[row] = fft_data[row] * (1 - row_fact_large) * row_fact_small
+        fft_data[backrow] = fft_data[backrow] * (1 - row_fact_large) * row_fact_small
+        fft_data[row+side_len/2] = fft_data[row+side_len/2] * (1 - row_fact_large*col_fact_large) * row_fact_small*col_fact_small
+        fft_data[backrow+side_len/2] = fft_data[backrow+side_len/2] * (1 - row_fact_large*col_fact_large) * row_fact_small*col_fact_small
+        filter_data[row] = filter_data[row] * (1 - row_fact_large) * row_fact_small
+        filter_data[backrow] = filter_data[backrow] * (1 - row_fact_large) * row_fact_small
+        filter_data[row+side_len/2] = filter_data[row+side_len/2] * (1 - row_fact_large*col_fact_large) * row_fact_small*col_fact_small
+        filter_data[backrow+side_len/2] = filter_data[backrow+side_len/2] * (1 - row_fact_large*col_fact_large) * row_fact_small*col_fact_small
+
+    fft_data = np.reshape(fft_data, fft_data_shape)
+    filter_data = np.reshape(filter_data, fft_data_shape)
+
+    return fft_data, filter_data
 
 def main():
-    data_path = "E:\\fiji-win64\\AllaData\\data_16bit_512x512.raw"
+    data_path = r"/Users/rshkarin/Documents/AllaData/afm_data_16bit_512x512.raw"
     data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
 
     height, width = data.shape
@@ -77,15 +111,28 @@ def main():
     padded_data = np.zeros((pad_height, pad_width), dtype=np.int16)
     pad_offset_y, pad_offset_x = pad_height/2 - height/2, pad_width/2 - width/2
 
-    padded_data[pad_offset_y:pad_offset_y + height, \
-                pad_offset_x:pad_offset_x + height] = data
+    crop_bbox = np.index_exp[pad_offset_y:pad_offset_y + height, \
+                             pad_offset_x:pad_offset_x + width]
+
+    padded_data[crop_bbox] = data
 
     fft_data = np.fft.fft2(padded_data)
-    fft_data = np.fft.fftshift(fft_data)
 
+    filter_large_dia = 15
+    filter_small_dia = 5
+    filtered_fft_data, filter_data = filter(fft_data, filter_large_dia, filter_small_dia)
 
+    ifft_data = np.fft.ifft2(filtered_fft_data)
+    filtered_data = ifft_data.real[crop_bbox].astype(np.float32)
 
-    plt.imshow(padded_data)
+    p2, p98 = np.percentile(filtered_data, (1, 99))
+    filtered_rescaled_data = exposure.rescale_intensity(filtered_data, in_range=(p2, p98))
+
+    print "%s - %s" % (str(filtered_data.shape), str(filtered_data.dtype))
+    filtered_data.tofile(r"/Users/rshkarin/Documents/AllaData/filtered_afm_data_16bit_512x512.raw")
+    filtered_rescaled_data.tofile(r"/Users/rshkarin/Documents/AllaData/filtered_rescaled_afm_data_16bit_512x512.raw")
+
+    plt.imshow(filtered_rescaled_data)
     plt.show()
 
 
