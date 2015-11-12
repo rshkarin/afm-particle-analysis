@@ -1,11 +1,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import ndimage as ndi
 from skimage import exposure
+from skimage import filters
+from skimage import measure
+from skimage.feature import peak_local_max
+from skimage.morphology import watershed, disk
+from skimage.segmentation import random_walker
+from skimage.color import label2rgb
 
 def next_length_pow2(x):
     return 2 ** np.ceil(np.log2(abs(x)))
 
-def filter(fft_data, filter_large_dia, filter_small_dia):
+def band_pass_filter(fft_data, filter_large_dia, filter_small_dia):
     fft_data_shape = fft_data.shape
     side_len = fft_data_shape[0]
 
@@ -101,10 +108,32 @@ def filter(fft_data, filter_large_dia, filter_small_dia):
 
     return fft_data, filter_data
 
-def main():
-    data_path = r"/Users/rshkarin/Documents/AllaData/afm_data_16bit_512x512.raw"
-    data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
+def get_particles_stats(segmented_data, min_particle_size=20):
+    labeled_data, num_labels = ndi.measurements.label(segmented_data)
 
+    label_sizes = ndi.measurements.sum(segmented_data, labeled_data, np.arange(num_labels + 1))
+    filtered_small_particles = sizes < min_particle_size
+    remove_particles = filtered_small_particles[labeled_data]
+    labeled_data[remove_particles] = 0
+
+    u_labeled_data = np.unique(labeled_data)
+    labeled_data = np.searchsorted(u_labeled_data, labeled_data)
+
+    labeled_data_stats = measure.regionprops(labeled_data, properties=properties)
+
+
+def segment_data(data):
+    th_val = filters.threshold_otsu(data)
+    thresholded_particles = data > th_val
+    distance = ndi.distance_transform_edt(thresholded_particles)
+    local_maxi = peak_local_max(distance, min_distance=5, indices=False, footprint=disk(10), labels=thresholded_particles)
+    local_maxi = ndi.morphology.binary_dilation(local_maxi, structure=ndi.generate_binary_structure(2, 1), iterations=2)
+    labeled_data, num_features = ndi.measurements.label(local_maxi)
+    segmented_data = watershed(-distance, labeled_data, mask=thresholded_particles)
+
+    return segmented_data, local_maxi
+
+def preprocess_data(data):
     height, width = data.shape
     pad_height, pad_width = next_length_pow2(height + 1), next_length_pow2(width + 1)
 
@@ -120,20 +149,46 @@ def main():
 
     filter_large_dia = 15
     filter_small_dia = 5
-    filtered_fft_data, filter_data = filter(fft_data, filter_large_dia, filter_small_dia)
+    filtered_fft_data, filter_data = band_pass_filter(fft_data, filter_large_dia, filter_small_dia)
 
     ifft_data = np.fft.ifft2(filtered_fft_data)
     filtered_data = ifft_data.real[crop_bbox].astype(np.float32)
 
-    p2, p98 = np.percentile(filtered_data, (1, 99))
+    p2, p98 = np.percentile(filtered_data, (5, 95))
     filtered_rescaled_data = exposure.rescale_intensity(filtered_data, in_range=(p2, p98))
+    #filtered_rescaled_data = ndi.filters.gaussian_filter(filtered_rescaled_data, sigma=3.0)
 
-    filtered_data.tofile(r"/Users/rshkarin/Documents/AllaData/filtered_afm_data_16bit_512x512.raw")
-    filtered_rescaled_data.tofile(r"/Users/rshkarin/Documents/AllaData/filtered_rescaled_afm_data_16bit_512x512.raw")
+    return filtered_rescaled_data
 
-    plt.imshow(filtered_rescaled_data)
+def main():
+    data_path = "E:\\fiji-win64\\AllaData\\data_16bit_512x512.raw"
+    data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
+    properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation']
+
+    processed_data = preprocess_data(data)
+    segmented_data, local_maxi = segment_data(processed_data)
+
+    processed_data.tofile("E:\\fiji-win64\\AllaData\\processed_afm_data_16bit_512x512.raw")
+    segmented_data.tofile("E:\\fiji-win64\\AllaData\\segmented_filtered_rescaled_afm_data_16bit_512x512.raw")
+
+    fig, axes = plt.subplots(ncols=3, figsize=(20, 10), sharex=True, sharey=True, subplot_kw={'adjustable':'box-forced'})
+    ax0, ax1, ax2 = axes
+
+    ax0.imshow(processed_data, interpolation='bicubic')
+    ax0.set_title('Preprocessed data')
+
+    ax1.imshow(segmented_data, cmap='gray')
+    ax1.set_title('Original data')
+
+    ax2.imshow(label2rgb(local_maxi, image=processed_data))
+    #ax2.imshow(local_maxi)
+    ax2.set_title('Segmented data')
+
+    for ax in axes:
+        ax.axis('off')
+
+    fig.subplots_adjust(hspace=0.01, wspace=0.01, top=0.9, bottom=0, left=0, right=1)
     plt.show()
-
 
 if __name__ == "__main__":
     main()
