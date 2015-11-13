@@ -1,5 +1,8 @@
+import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+import colormaps as cmaps
 from scipy import ndimage as ndi
 from skimage import exposure
 from skimage import filters
@@ -108,19 +111,45 @@ def band_pass_filter(fft_data, filter_large_dia, filter_small_dia):
 
     return fft_data, filter_data
 
-def get_particles_stats(segmented_data, min_particle_size=20):
+def particles_stats(segmented_data, properties, min_particle_size=20):
     labeled_data, num_labels = ndi.measurements.label(segmented_data)
 
     label_sizes = ndi.measurements.sum(segmented_data, labeled_data, np.arange(num_labels + 1))
-    filtered_small_particles = sizes < min_particle_size
+    filtered_small_particles = label_sizes < min_particle_size
     remove_particles = filtered_small_particles[labeled_data]
     labeled_data[remove_particles] = 0
 
     u_labeled_data = np.unique(labeled_data)
     labeled_data = np.searchsorted(u_labeled_data, labeled_data)
 
-    labeled_data_stats = measure.regionprops(labeled_data, properties=properties)
+    stats = pd.DataFrame(columns=properties)
 
+    for region in measure.regionprops(labeled_data):
+        stats = stats.append({_property: region[_property] for _property in properties}, \
+                                ignore_index=True)
+
+    return stats
+
+def process_stats(particles_stats, pixel_scale_factor=0.512):
+    if 'major_axis_length' in particles_stats and 'minor_axis_length' in particles_stats:
+        particles_stats['avg_axis'] = (particles_stats['major_axis_length'] + \
+                                            particles_stats['minor_axis_length']) / 2.0
+
+    stats_columns = list(particles_stats.columns.values)
+
+    if 'label' in stats_columns:
+        stats_columns.remove('label')
+
+    def scale_values(item):
+        if isinstance(item,tuple):
+            return tuple(x / pixel_scale_factor for x in item)
+        else:
+            return item / pixel_scale_factor
+
+    particles_stats_scaled = particles_stats.copy()
+    particles_stats_scaled[stats_columns] = particles_stats_scaled[stats_columns].applymap(scale_values)
+
+    return particles_stats_scaled, particles_stats_scaled.columns.values
 
 def segment_data(data):
     th_val = filters.threshold_otsu(data)
@@ -160,6 +189,26 @@ def preprocess_data(data):
 
     return filtered_rescaled_data
 
+def create_histogram_figure(stats, output_folder, column='avg_axis', range=None, color='r', figsize=(5,5), bins=20):
+    base_filename='histogram'
+    filename_suffix = '.svg'
+
+    plt.figure()
+    if not range:
+        stats[column].plot(kind='hist', bins=bins, color=color, figsize=figsize)
+    else:
+        stats[column][stats[column].in(range)].plot(kind='hist', bins=bins, color=color, figsize=figsize)
+    #plt.hist(particles_stats[col].values, bins=bins, range=range)
+    #plt.title(col)
+    #plt.xlabel('Particle %s' % col)
+    #plt.ylabel('Frequency')
+    #plt.x_lim([0, particles_stats[col].mean()])
+    #plt.savefig(os.path.join(output_folder, base_filename + '_' + col + filename_suffix))
+    plt.show()
+
+def create_figures(particles_stats):
+    pass
+
 def main():
     data_path = "E:\\fiji-win64\\AllaData\\data_16bit_512x512.raw"
     data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
@@ -167,28 +216,32 @@ def main():
 
     processed_data = preprocess_data(data)
     segmented_data, local_maxi = segment_data(processed_data)
+    label_stats = particles_stats(segmented_data, properties)
+    processed_stats, columns = process_stats(label_stats)
 
     processed_data.tofile("E:\\fiji-win64\\AllaData\\processed_afm_data_16bit_512x512.raw")
     segmented_data.tofile("E:\\fiji-win64\\AllaData\\segmented_filtered_rescaled_afm_data_16bit_512x512.raw")
 
-    fig, axes = plt.subplots(ncols=3, figsize=(20, 10), sharex=True, sharey=True, subplot_kw={'adjustable':'box-forced'})
-    ax0, ax1, ax2 = axes
+    create_histogram_figure(processed_stats, "E:\\fiji-win64\\AllaData", range=np.arange(300))
 
-    ax0.imshow(processed_data, interpolation='bicubic')
-    ax0.set_title('Preprocessed data')
-
-    ax1.imshow(segmented_data, cmap='gray')
-    ax1.set_title('Original data')
-
-    ax2.imshow(label2rgb(local_maxi, image=processed_data))
-    #ax2.imshow(local_maxi)
-    ax2.set_title('Segmented data')
-
-    for ax in axes:
-        ax.axis('off')
-
-    fig.subplots_adjust(hspace=0.01, wspace=0.01, top=0.9, bottom=0, left=0, right=1)
-    plt.show()
+    # fig, axes = plt.subplots(ncols=3, figsize=(20, 10), sharex=True, sharey=True, subplot_kw={'adjustable':'box-forced'})
+    # ax0, ax1, ax2 = axes
+    #
+    # ax0.imshow(processed_data, interpolation='bicubic')
+    # ax0.set_title('Preprocessed data')
+    #
+    # ax1.imshow(segmented_data, cmap='gray')
+    # ax1.set_title('Original data')
+    #
+    # ax2.imshow(label2rgb(local_maxi, image=processed_data))
+    # #ax2.imshow(local_maxi)
+    # ax2.set_title('Segmented data')
+    #
+    # for ax in axes:
+    #     ax.axis('off')
+    #
+    # fig.subplots_adjust(hspace=0.01, wspace=0.01, top=0.9, bottom=0, left=0, right=1)
+    # plt.show()
 
 if __name__ == "__main__":
     main()
