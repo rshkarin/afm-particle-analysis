@@ -1,9 +1,14 @@
+# -*- coding: utf-8 -*-
+
 import os
+import colorsys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import colormaps as cmaps
+from matplotlib.ticker import FormatStrFormatter
 from scipy import ndimage as ndi
+from scipy.misc import imsave
 from skimage import exposure
 from skimage import filters
 from skimage import measure
@@ -11,6 +16,20 @@ from skimage.feature import peak_local_max
 from skimage.morphology import watershed, disk
 from skimage.segmentation import random_walker
 from skimage.color import label2rgb
+
+AXES_NAMES = {
+    "avg_axis": {"en": "Average axis (nm)", "ru": u"Средняя ось (нм)"},
+    "frequency": {"en": "Frequency", 'ru': u"Частота"}
+}
+
+def _get_colors(num_colors):
+    colors=[]
+    for i in np.arange(0., 360., 360. / num_colors):
+        hue = i/360.
+        lightness = (50 + np.random.rand() * 10)/100.
+        saturation = (90 + np.random.rand() * 10)/100.
+        colors.append(colorsys.hls_to_rgb(hue, lightness, saturation))
+    return colors
 
 def next_length_pow2(x):
     return 2 ** np.ceil(np.log2(abs(x)))
@@ -111,7 +130,7 @@ def band_pass_filter(fft_data, filter_large_dia, filter_small_dia):
 
     return fft_data, filter_data
 
-def particles_stats(segmented_data, properties, min_particle_size=20):
+def particles_stats(segmented_data, properties, min_particle_size=5):
     labeled_data, num_labels = ndi.measurements.label(segmented_data)
 
     label_sizes = ndi.measurements.sum(segmented_data, labeled_data, np.arange(num_labels + 1))
@@ -162,7 +181,7 @@ def segment_data(data):
 
     return segmented_data, local_maxi
 
-def preprocess_data(data):
+def preprocess_data(data, small_particle=5, large_particle=15):
     height, width = data.shape
     pad_height, pad_width = next_length_pow2(height + 1), next_length_pow2(width + 1)
 
@@ -176,9 +195,7 @@ def preprocess_data(data):
 
     fft_data = np.fft.fft2(padded_data)
 
-    filter_large_dia = 15
-    filter_small_dia = 5
-    filtered_fft_data, filter_data = band_pass_filter(fft_data, filter_large_dia, filter_small_dia)
+    filtered_fft_data, filter_data = band_pass_filter(fft_data, large_particle, small_particle)
 
     ifft_data = np.fft.ifft2(filtered_fft_data)
     filtered_data = ifft_data.real[crop_bbox].astype(np.float32)
@@ -189,28 +206,59 @@ def preprocess_data(data):
 
     return filtered_rescaled_data
 
-def create_histogram_figure(stats, output_folder, column='avg_axis', range=None, color='r', figsize=(5,5), bins=20):
+def create_histogram_figure(stats, output_path, column='avg_axis', range=[], color='r', figsize=(8,6), bins=20, language='en'):
     base_filename='histogram'
-    filename_suffix = '.svg'
+    filename_suffix = '.png'
 
-    plt.figure()
-    if not range:
-        stats[column].plot(kind='hist', bins=bins, color=color, figsize=figsize)
-    else:
-        stats[column][stats[column].in(range)].plot(kind='hist', bins=bins, color=color, figsize=figsize)
-    #plt.hist(particles_stats[col].values, bins=bins, range=range)
-    #plt.title(col)
-    #plt.xlabel('Particle %s' % col)
-    #plt.ylabel('Frequency')
-    #plt.x_lim([0, particles_stats[col].mean()])
-    #plt.savefig(os.path.join(output_folder, base_filename + '_' + col + filename_suffix))
+    filtered_data = stats[column]
+
+    if len(range):
+       filtered_data = stats[column][(stats[column] >= np.min(range)) & \
+                                       (stats[column] <= np.max(range))]
+    fig, ax = plt.subplots()
+    fig.set_size_inches(figsize)
+    counts, bins, patches = ax.hist(filtered_data.values, bins=bins, color=color)
+    ax.set_xticks(bins)
+    ax.xaxis.set_major_formatter(FormatStrFormatter('%0.f'))
+    plt.xlabel(AXES_NAMES[column][language])
+    plt.ylabel(AXES_NAMES['frequency'][language])
+    plt.savefig(os.path.join(output_path, base_filename + '_' + column + filename_suffix), bbox_inches='tight')
     plt.show()
 
 def create_figures(particles_stats):
     pass
 
+def create_overlay_figure(data, data_mask, data_stats, filename, output_path, base_filename='overlay', file_ext='.png'):
+    custom_colors = _get_colors(len(data_stats.index))
+    image_overlay = label2rgb(data_mask, image=data, bg_label=0.0, bg_color=(0,0,0), colors=custom_colors)
+    data_mask.tofile(os.path.join(output_path, base_filename + '8bit_512x512_' + 'mask' + '.raw'))
+    imsave(os.path.join(output_path, base_filename + '_' + filename + file_ext), image_overlay)
+    imsave(os.path.join(output_path, base_filename + '_' + 'mask' + file_ext), ndi.morphology.binary_erosion(data_mask))
+    # plt.imshow(image_overlay)
+    # plt.show()
+
+    return image_overlay
+
+def create_axis_figure(data, label_stats):
+    fig, ax = plt.subplots()
+    ax.imshow(data, cmap=plt.cm.gray)
+
+    for index, row in label_stats.iterrows():
+        y0, x0 = row.centroid
+        orientation = row.orientation
+        x1 = x0 + np.cos(orientation) * 0.5 * row.major_axis_length
+        y1 = y0 - np.sin(orientation) * 0.5 * row.major_axis_length
+        x2 = x0 - np.sin(orientation) * 0.5 * row.minor_axis_length
+        y2 = y0 - np.cos(orientation) * 0.5 * row.minor_axis_length
+
+        ax.plot((x0, x1), (y0, y1), '-r', linewidth=1.0)
+        ax.plot((x0, x2), (y0, y2), '-r', linewidth=1.0)
+        ax.plot(x0, y0, '.g', markersize=2)
+
+    plt.show()
+
 def main():
-    data_path = "E:\\fiji-win64\\AllaData\\data_16bit_512x512.raw"
+    data_path = "/Users/rshkarin/Documents/AllaData/afm_data_16bit_512x512.raw"
     data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
     properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation']
 
@@ -219,10 +267,15 @@ def main():
     label_stats = particles_stats(segmented_data, properties)
     processed_stats, columns = process_stats(label_stats)
 
-    processed_data.tofile("E:\\fiji-win64\\AllaData\\processed_afm_data_16bit_512x512.raw")
-    segmented_data.tofile("E:\\fiji-win64\\AllaData\\segmented_filtered_rescaled_afm_data_16bit_512x512.raw")
+    output_path = "/Users/rshkarin/Documents/AllaData/"
 
-    create_histogram_figure(processed_stats, "E:\\fiji-win64\\AllaData", range=np.arange(300))
+    processed_data.tofile("/Users/rshkarin/Documents/AllaData/processed_afm_data_16bit_512x512.raw")
+    segmented_data.tofile("/Users/rshkarin/Documents/AllaData/segmented_filtered_rescaled_afm_data_16bit_512x512.raw")
+
+    image_overlay = create_overlay_figure(data, segmented_data, processed_stats, "avg_axis", output_path)
+    create_axis_figure(image_overlay, label_stats)
+    # create_histogram_figure(processed_stats, output_path, range=range(10,300), bins=15, language='ru')
+
 
     # fig, axes = plt.subplots(ncols=3, figsize=(20, 10), sharex=True, sharey=True, subplot_kw={'adjustable':'box-forced'})
     # ax0, ax1, ax2 = axes
