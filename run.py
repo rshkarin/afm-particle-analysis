@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-
+import platform
 import os
+import sys
 import colorsys
 import numpy as np
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 import colormaps as cmaps
 from matplotlib.ticker import FormatStrFormatter
@@ -16,6 +18,9 @@ from skimage.feature import peak_local_max
 from skimage.morphology import watershed, disk
 from skimage.segmentation import random_walker
 from skimage.color import label2rgb
+
+term_enc = 'utf-8' if platform.uname()[0] == 'Linux' else 'cp1251'
+matplotlib.style.use('ggplot')
 
 AXES_NAMES = {
     "avg_axis": {"en": "Average axis (nm)", "ru": u"Средняя ось (нм)"},
@@ -34,7 +39,7 @@ def _get_colors(num_colors):
 def next_length_pow2(x):
     return 2 ** np.ceil(np.log2(abs(x)))
 
-def band_pass_filter(fft_data, filter_large_dia, filter_small_dia):
+def band_pass_filter(fft_data, filter_large_dia=15, filter_small_dia=5):
     fft_data_shape = fft_data.shape
     side_len = fft_data_shape[0]
 
@@ -131,21 +136,16 @@ def band_pass_filter(fft_data, filter_large_dia, filter_small_dia):
     return fft_data, filter_data
 
 def particles_stats(segmented_data, properties, min_particle_size=5):
-    labeled_data, num_labels = ndi.measurements.label(segmented_data)
-
-    label_sizes = ndi.measurements.sum(segmented_data, labeled_data, np.arange(num_labels + 1))
-    filtered_small_particles = label_sizes < min_particle_size
-    remove_particles = filtered_small_particles[labeled_data]
-    labeled_data[remove_particles] = 0
-
-    u_labeled_data = np.unique(labeled_data)
-    labeled_data = np.searchsorted(u_labeled_data, labeled_data)
+    u_labeled_data = np.unique(segmented_data)
+    labeled_data = np.searchsorted(u_labeled_data, segmented_data)
 
     stats = pd.DataFrame(columns=properties)
 
     for region in measure.regionprops(labeled_data):
         stats = stats.append({_property: region[_property] for _property in properties}, \
                                 ignore_index=True)
+
+    print stats
 
     return stats
 
@@ -170,14 +170,19 @@ def process_stats(particles_stats, pixel_scale_factor=0.512):
 
     return particles_stats_scaled, particles_stats_scaled.columns.values
 
-def segment_data(data):
+def segment_data(data, min_distance=5, footprint=disk(10), indices=False):
     th_val = filters.threshold_otsu(data)
     thresholded_particles = data > th_val
     distance = ndi.distance_transform_edt(thresholded_particles)
-    local_maxi = peak_local_max(distance, min_distance=5, indices=False, footprint=disk(10), labels=thresholded_particles)
-    local_maxi = ndi.morphology.binary_dilation(local_maxi, structure=ndi.generate_binary_structure(2, 1), iterations=2)
+    distance = ndi.maximum_filter(distance, footprint=disk(5), mode='nearest')
+    # plt.imshow(distance)
+    # plt.show()
+    # sys.exit()
+    local_maxi = peak_local_max(distance, min_distance=min_distance, indices=indices, footprint=footprint, labels=thresholded_particles)
+    #local_maxi = ndi.morphology.binary_dilation(local_maxi, structure=ndi.generate_binary_structure(2, 1), iterations=2)
     labeled_data, num_features = ndi.measurements.label(local_maxi)
     segmented_data = watershed(-distance, labeled_data, mask=thresholded_particles)
+    #segmented_data = random_walker(data, labeled_data, beta=400)
 
     return segmented_data, local_maxi
 
@@ -202,7 +207,8 @@ def preprocess_data(data, small_particle=5, large_particle=15):
 
     p2, p98 = np.percentile(filtered_data, (5, 95))
     filtered_rescaled_data = exposure.rescale_intensity(filtered_data, in_range=(p2, p98))
-    #filtered_rescaled_data = ndi.filters.gaussian_filter(filtered_rescaled_data, sigma=3.0)
+    # filtered_rescaled_data = ndi.filters.gaussian_filter(filtered_rescaled_data, sigma=3.0)
+    # filtered_rescaled_data = ndi.filters.median_filter(filtered_rescaled_data, size=3.0)
 
     return filtered_rescaled_data
 
@@ -229,6 +235,10 @@ def create_figures(particles_stats):
     pass
 
 def create_overlay_figure(data, data_mask, data_stats, filename, output_path, base_filename='overlay', file_ext='.png'):
+    if not len(data_stats.index):
+        print 'No data stats collected.'
+        sys.exit(1)
+
     custom_colors = _get_colors(len(data_stats.index))
     image_overlay = label2rgb(data_mask, image=data, bg_label=0.0, bg_color=(0,0,0), colors=custom_colors)
     data_mask.tofile(os.path.join(output_path, base_filename + '8bit_512x512_' + 'mask' + '.raw'))
@@ -258,8 +268,11 @@ def create_axis_figure(data, label_stats):
     plt.show()
 
 def main():
-    data_path = "/Users/rshkarin/Documents/AllaData/afm_data_16bit_512x512.raw"
+    root_folder_path = "E:\\fiji-win64\\AllaData"
+    data_path = os.path.join(root_folder_path, "afm_data_16bit_512x512.raw")
     data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
+    # data_path = os.path.join(root_folder_path, "afm_data_16bit_100x100.raw")
+    # data = np.memmap(data_path, dtype=np.int16, shape=(100,100), mode='r')
     properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation']
 
     processed_data = preprocess_data(data)
@@ -267,34 +280,34 @@ def main():
     label_stats = particles_stats(segmented_data, properties)
     processed_stats, columns = process_stats(label_stats)
 
-    output_path = "/Users/rshkarin/Documents/AllaData/"
+    output_path = root_folder_path
 
-    processed_data.tofile("/Users/rshkarin/Documents/AllaData/processed_afm_data_16bit_512x512.raw")
-    segmented_data.tofile("/Users/rshkarin/Documents/AllaData/segmented_filtered_rescaled_afm_data_16bit_512x512.raw")
+    processed_data.tofile(os.path.join(output_path, "processed_afm_data_16bit_512x512.raw"))
+    segmented_data.tofile(os.path.join(output_path, "segmented_filtered_rescaled_afm_data_16bit_512x512.raw"))
 
     image_overlay = create_overlay_figure(data, segmented_data, processed_stats, "avg_axis", output_path)
     create_axis_figure(image_overlay, label_stats)
-    # create_histogram_figure(processed_stats, output_path, range=range(10,300), bins=15, language='ru')
+    create_histogram_figure(processed_stats, output_path, range=range(10,400), bins=20, language='en')
 
 
-    # fig, axes = plt.subplots(ncols=3, figsize=(20, 10), sharex=True, sharey=True, subplot_kw={'adjustable':'box-forced'})
-    # ax0, ax1, ax2 = axes
-    #
-    # ax0.imshow(processed_data, interpolation='bicubic')
-    # ax0.set_title('Preprocessed data')
-    #
-    # ax1.imshow(segmented_data, cmap='gray')
-    # ax1.set_title('Original data')
-    #
-    # ax2.imshow(label2rgb(local_maxi, image=processed_data))
-    # #ax2.imshow(local_maxi)
-    # ax2.set_title('Segmented data')
-    #
-    # for ax in axes:
-    #     ax.axis('off')
-    #
-    # fig.subplots_adjust(hspace=0.01, wspace=0.01, top=0.9, bottom=0, left=0, right=1)
-    # plt.show()
+    fig, axes = plt.subplots(ncols=3, figsize=(20, 10), sharex=True, sharey=True, subplot_kw={'adjustable':'box-forced'})
+    ax0, ax1, ax2 = axes
+
+    ax0.imshow(processed_data, interpolation='bicubic')
+    ax0.set_title('Preprocessed data')
+
+    ax1.imshow(segmented_data, cmap='gray')
+    ax1.set_title('Original data')
+
+    ax2.imshow(label2rgb(local_maxi, image=processed_data))
+    #ax2.imshow(local_maxi)
+    ax2.set_title('Segmented data')
+
+    for ax in axes:
+        ax.axis('off')
+
+    fig.subplots_adjust(hspace=0.01, wspace=0.01, top=0.9, bottom=0, left=0, right=1)
+    plt.show()
 
 if __name__ == "__main__":
     main()
