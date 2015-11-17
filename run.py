@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import colormaps as cmaps
 from matplotlib.ticker import FormatStrFormatter
+from matplotlib.patches import Ellipse
 from scipy import ndimage as ndi
 from scipy.misc import imsave
 from skimage import exposure
@@ -251,38 +252,39 @@ def create_overlay_figure(data, data_mask, data_stats, filename, output_path, ba
     return image_overlay
 
 def create_axis_figure(data, label_stats, filename, output_path, base_filename='axis', file_ext='.png', figsize=(8,8)):
-    # ax = plt.Axes(plt.gcf(), [0,0,1,1], yticks=[], xticks=[], frame_on=False)
-    # plt.gcf().delaxes(plt.gca())
-    # plt.gcf().add_axes(ax)
-    # plt.gcf().add_axes(ax)
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_axes([.0, .0, 1.0, 1.0])
+    ax.imshow(data, cmap=cm.gray)
+    ax.autoscale(False)
+    ax.set_adjustable('box-forced')
+    ax.set_axis_off()
 
-    im = plt.imshow(data, cmap=cm.gray)
-    #
-    # for index, row in label_stats.iterrows():
-    #     y0, x0 = row.centroid
-    #     orientation = row.orientation
-    #     x1 = x0 + np.cos(orientation) * 0.5 * row.major_axis_length
-    #     y1 = y0 - np.sin(orientation) * 0.5 * row.major_axis_length
-    #     x2 = x0 - np.sin(orientation) * 0.5 * row.minor_axis_length
-    #     y2 = y0 - np.cos(orientation) * 0.5 * row.minor_axis_length
-    #
-    #     ax.plot((x0, x1), (y0, y1), '-r', linewidth=1.0)
-    #     ax.plot((x0, x2), (y0, y2), '-r', linewidth=1.0)
-    #     ax.plot(x0, y0, '.g', markersize=2)
-    #
-    plt.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
-    #
-    # plt.savefig(os.path.join(output_path, '_'.join([filename, base_filename]) + file_ext), bbox_inches='tight')
+    for index, row in label_stats.iterrows():
+        y0, x0 = row.centroid
+        orientation = row.orientation
+        x1 = x0 + np.cos(orientation) * 0.5 * row.major_axis_length
+        y1 = y0 - np.sin(orientation) * 0.5 * row.major_axis_length
+        x2 = x0 - np.sin(orientation) * 0.5 * row.minor_axis_length
+        y2 = y0 - np.cos(orientation) * 0.5 * row.minor_axis_length
 
+        ax.plot((x0, x1), (y0, y1), '-r', linewidth=1.5)
+        ax.plot((x0, x2), (y0, y2), '-r', linewidth=1.5)
+        ax.plot(x0, y0, '.g', markersize=5)
+
+        minr, minc, maxr, maxc = row.bbox
+        approx_particle = Ellipse(row.centroid, maxc-minc, maxr-minr, angle=orientation, edgecolor='b', linewidth=2, fill=False)
+        ax.add_patch(approx_particle)
+
+    plt.savefig(os.path.join(output_path, '_'.join([filename, base_filename]) + file_ext), bbox_inches='tight')
     plt.show()
 
 def main():
-    root_folder_path = "/Users/rshkarin/Documents/AllaData"
+    root_folder_path = "E:\\fiji-win64\\AllaData"
     data_path = os.path.join(root_folder_path, "afm_data_16bit_512x512.raw")
     data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
     # data_path = os.path.join(root_folder_path, "afm_data_16bit_100x100.raw")
     # data = np.memmap(data_path, dtype=np.int16, shape=(100,100), mode='r')
-    properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation']
+    properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation','bbox']
 
     processed_data = preprocess_data(data)
     segmented_data, local_maxi = segment_data(processed_data)
