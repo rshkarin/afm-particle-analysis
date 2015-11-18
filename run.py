@@ -31,14 +31,10 @@ AXES_NAMES = {
 }
 
 def _get_colors(num_colors):
-    colors=[]
-    for i in np.arange(0., 360., 360. / num_colors):
-        hue = i/360.
-        lightness = (50 + np.random.rand() * 10)/100.
-        saturation = (90 + np.random.rand() * 10)/100.
-        colors.append(colorsys.hls_to_rgb(hue, lightness, saturation))
+    colors = [(1,1,1)] + [(random(),random(),random()) for i in xrange(255)]
+    new_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('new_cmap', colors, N=len(label_stats.index))
 
-    return colors
+    return new_cmap
 
 def next_length_pow2(x):
     return 2 ** np.ceil(np.log2(abs(x)))
@@ -239,16 +235,13 @@ def create_overlay_figure(data, data_mask, label_stats, filename, output_path, b
         print 'No data stats collected.'
         sys.exit(1)
 
-    colors = [(1,1,1)] + [(random(),random(),random()) for i in xrange(255)]
-    new_map = matplotlib.colors.LinearSegmentedColormap.from_list('new_map', colors, N=len(label_stats.index))
-
     fig = plt.figure(figsize=figsize)
     ax = fig.add_axes([.0, .0, 1.0, 1.0])
     ax.imshow(data, cmap=cm.gray, interpolation='bicubic')
     ax.autoscale(False)
     ax.set_adjustable('box-forced')
     ax.set_axis_off()
-    ax.imshow(data_mask, alpha=0.3, cmap=new_map, interpolation='bicubic')
+    ax.imshow(data_mask, alpha=0.3, cmap=_get_colors(len(label_stats.index)), interpolation='bicubic')
     plt.savefig(os.path.join(output_path, '_'.join([filename, base_filename]) + filename_suffix), bbox_inches='tight')
 
     plt.show()
