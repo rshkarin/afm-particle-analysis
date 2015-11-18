@@ -3,6 +3,7 @@ import platform
 import os
 import sys
 import colorsys
+from random import random
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -10,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import colormaps as cmaps
 from matplotlib.ticker import FormatStrFormatter
-from matplotlib.patches import Ellipse
+from matplotlib.patches import Ellipse, Circle
 from scipy import ndimage as ndi
 from scipy.misc import imsave
 from skimage import exposure
@@ -36,6 +37,7 @@ def _get_colors(num_colors):
         lightness = (50 + np.random.rand() * 10)/100.
         saturation = (90 + np.random.rand() * 10)/100.
         colors.append(colorsys.hls_to_rgb(hue, lightness, saturation))
+
     return colors
 
 def next_length_pow2(x):
@@ -181,10 +183,8 @@ def segment_data(data, min_distance=5, footprint=disk(10), indices=False):
     # plt.show()
     # sys.exit()
     local_maxi = peak_local_max(distance, min_distance=min_distance, indices=indices, footprint=footprint, labels=thresholded_particles)
-    #local_maxi = ndi.morphology.binary_dilation(local_maxi, structure=ndi.generate_binary_structure(2, 1), iterations=2)
     labeled_data, num_features = ndi.measurements.label(local_maxi)
     segmented_data = watershed(-distance, labeled_data, mask=thresholded_particles)
-    #segmented_data = random_walker(data, labeled_data, beta=400)
 
     return segmented_data, local_maxi
 
@@ -209,8 +209,6 @@ def preprocess_data(data, small_particle=5, large_particle=15):
 
     p2, p98 = np.percentile(filtered_data, (5, 95))
     filtered_rescaled_data = exposure.rescale_intensity(filtered_data, in_range=(p2, p98))
-    # filtered_rescaled_data = ndi.filters.gaussian_filter(filtered_rescaled_data, sigma=3.0)
-    # filtered_rescaled_data = ndi.filters.median_filter(filtered_rescaled_data, size=3.0)
 
     return filtered_rescaled_data
 
@@ -236,20 +234,24 @@ def create_histogram_figure(stats, output_path, column='avg_axis', range=[], col
 def create_figures(particles_stats):
     pass
 
-def create_overlay_figure(data, data_mask, data_stats, filename, output_path, base_filename='overlay', file_ext='.png'):
-    if not len(data_stats.index):
+def create_overlay_figure(data, data_mask, label_stats, filename, output_path, base_filename='label_overlay', filename_suffix='.png', figsize=(8,8)):
+    if not len(label_stats.index):
         print 'No data stats collected.'
         sys.exit(1)
 
-    custom_colors = _get_colors(len(data_stats.index))
-    image_overlay = label2rgb(data_mask, image=data, bg_label=0.0, bg_color=(0,0,0), colors=custom_colors)
-    data_mask.tofile(os.path.join(output_path, base_filename + '8bit_512x512_' + 'mask' + '.raw'))
-    imsave(os.path.join(output_path, base_filename + '_' + filename + file_ext), image_overlay)
-    imsave(os.path.join(output_path, base_filename + '_' + 'mask' + file_ext), ndi.morphology.binary_erosion(data_mask))
-    # plt.imshow(image_overlay)
-    # plt.show()
+    colors = [(1,1,1)] + [(random(),random(),random()) for i in xrange(255)]
+    new_map = matplotlib.colors.LinearSegmentedColormap.from_list('new_map', colors, N=len(label_stats.index))
 
-    return image_overlay
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_axes([.0, .0, 1.0, 1.0])
+    ax.imshow(data, cmap=cm.gray, interpolation='bicubic')
+    ax.autoscale(False)
+    ax.set_adjustable('box-forced')
+    ax.set_axis_off()
+    ax.imshow(data_mask, alpha=0.3, cmap=new_map, interpolation='bicubic')
+    plt.savefig(os.path.join(output_path, '_'.join([filename, base_filename]) + filename_suffix), bbox_inches='tight')
+
+    plt.show()
 
 def create_axis_figure(data, label_stats, filename, output_path, base_filename='axis', file_ext='.png', figsize=(8,8)):
     fig = plt.figure(figsize=figsize)
@@ -271,15 +273,14 @@ def create_axis_figure(data, label_stats, filename, output_path, base_filename='
         ax.plot((x0, x2), (y0, y2), '-r', linewidth=1.5)
         ax.plot(x0, y0, '.g', markersize=5)
 
-        minr, minc, maxr, maxc = row.bbox
-        approx_particle = Ellipse(row.centroid, maxc-minc, maxr-minr, angle=orientation, edgecolor='b', linewidth=2, fill=False)
+        approx_particle = Circle((x0, y0), radius=row.avg_axis*0.5, edgecolor='b', linewidth=1, fill=False)
         ax.add_patch(approx_particle)
 
     plt.savefig(os.path.join(output_path, '_'.join([filename, base_filename]) + file_ext), bbox_inches='tight')
     plt.show()
 
 def main():
-    root_folder_path = "E:\\fiji-win64\\AllaData"
+    root_folder_path = "/Users/rshkarin/Documents/AllaData"
     data_path = os.path.join(root_folder_path, "afm_data_16bit_512x512.raw")
     data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
     # data_path = os.path.join(root_folder_path, "afm_data_16bit_100x100.raw")
@@ -296,7 +297,7 @@ def main():
     processed_data.tofile(os.path.join(output_path, "processed_afm_data_16bit_512x512.raw"))
     segmented_data.tofile(os.path.join(output_path, "segmented_filtered_rescaled_afm_data_16bit_512x512.raw"))
 
-    image_overlay = create_overlay_figure(data, segmented_data, processed_stats, "avg_axis", output_path)
+    create_overlay_figure(data, segmented_data, label_stats, "sample0001", output_path)
     create_axis_figure(data, label_stats, "sample0001", output_path)
     create_histogram_figure(processed_stats, output_path, range=range(10,400), bins=20, language='en')
 
