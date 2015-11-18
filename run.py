@@ -144,9 +144,7 @@ def particles_stats(segmented_data, properties, min_particle_size=5):
     for region in measure.regionprops(labeled_data):
         stats = stats.append({_property: region[_property] for _property in properties}, \
                                 ignore_index=True)
-
-    print stats
-
+                                
     return stats
 
 def process_stats(particles_stats, pixel_scale_factor=0.512):
@@ -175,9 +173,6 @@ def segment_data(data, min_distance=5, footprint=disk(10), indices=False):
     thresholded_particles = data > th_val
     distance = ndi.distance_transform_edt(thresholded_particles)
     distance = ndi.maximum_filter(distance, footprint=disk(5), mode='nearest')
-    # plt.imshow(distance)
-    # plt.show()
-    # sys.exit()
     local_maxi = peak_local_max(distance, min_distance=min_distance, indices=indices, footprint=footprint, labels=thresholded_particles)
     labeled_data, num_features = ndi.measurements.label(local_maxi)
     segmented_data = watershed(-distance, labeled_data, mask=thresholded_particles)
@@ -276,8 +271,6 @@ def main():
     root_folder_path = "/Users/rshkarin/Documents/AllaData"
     data_path = os.path.join(root_folder_path, "afm_data_16bit_512x512.raw")
     data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
-    # data_path = os.path.join(root_folder_path, "afm_data_16bit_100x100.raw")
-    # data = np.memmap(data_path, dtype=np.int16, shape=(100,100), mode='r')
     properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation','bbox']
 
     processed_data = preprocess_data(data)
@@ -293,26 +286,6 @@ def main():
     create_overlay_figure(data, segmented_data, label_stats, "sample0001", output_path)
     create_axis_figure(data, label_stats, "sample0001", output_path)
     create_histogram_figure(processed_stats, output_path, range=range(10,400), bins=20, language='en')
-
-
-    # fig, axes = plt.subplots(ncols=3, figsize=(20, 10), sharex=True, sharey=True, subplot_kw={'adjustable':'box-forced'})
-    # ax0, ax1, ax2 = axes
-    #
-    # ax0.imshow(processed_data, interpolation='bicubic')
-    # ax0.set_title('Preprocessed data')
-    #
-    # ax1.imshow(segmented_data, cmap='gray')
-    # ax1.set_title('Original data')
-    #
-    # ax2.imshow(label2rgb(local_maxi, image=processed_data))
-    # #ax2.imshow(local_maxi)
-    # ax2.set_title('Segmented data')
-    #
-    # for ax in axes:
-    #     ax.axis('off')
-    #
-    # fig.subplots_adjust(hspace=0.01, wspace=0.01, top=0.9, bottom=0, left=0, right=1)
-    # plt.show()
 
 if __name__ == "__main__":
     main()
