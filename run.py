@@ -3,6 +3,7 @@ import platform
 import os
 import sys
 import colorsys
+import nanoscope
 from random import random
 import numpy as np
 import pandas as pd
@@ -32,7 +33,7 @@ AXES_NAMES = {
 
 def _get_colors(num_colors):
     colors = [(1,1,1)] + [(random(),random(),random()) for i in xrange(255)]
-    new_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('new_cmap', colors, N=len(label_stats.index))
+    new_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('new_cmap', colors, N=num_colors)
 
     return new_cmap
 
@@ -144,7 +145,7 @@ def particles_stats(segmented_data, properties, min_particle_size=5):
     for region in measure.regionprops(labeled_data):
         stats = stats.append({_property: region[_property] for _property in properties}, \
                                 ignore_index=True)
-                                
+
     return stats
 
 def process_stats(particles_stats, pixel_scale_factor=0.512):
@@ -198,8 +199,8 @@ def preprocess_data(data, small_particle=5, large_particle=15):
     ifft_data = np.fft.ifft2(filtered_fft_data)
     filtered_data = ifft_data.real[crop_bbox].astype(np.float32)
 
-    p2, p98 = np.percentile(filtered_data, (5, 95))
-    filtered_rescaled_data = exposure.rescale_intensity(filtered_data, in_range=(p2, p98))
+    p1, p2 = np.percentile(filtered_data, (5, 95))
+    filtered_rescaled_data = exposure.rescale_intensity(filtered_data, in_range=(p1, p2))
 
     return filtered_rescaled_data
 
@@ -269,8 +270,10 @@ def create_axis_figure(data, label_stats, filename, output_path, base_filename='
 
 def main():
     root_folder_path = "/Users/rshkarin/Documents/AllaData"
-    data_path = os.path.join(root_folder_path, "afm_data_16bit_512x512.raw")
-    data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
+    afm_image = nanoscope.read(os.path.join(root_folder_path, 'data.000'))
+    data = afm_image.height.data
+    # data_path = os.path.join(root_folder_path, "afm_data_16bit_512x512.raw")
+    # data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
     properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation','bbox']
 
     processed_data = preprocess_data(data)
@@ -279,9 +282,6 @@ def main():
     processed_stats, columns = process_stats(label_stats)
 
     output_path = root_folder_path
-
-    processed_data.tofile(os.path.join(output_path, "processed_afm_data_16bit_512x512.raw"))
-    segmented_data.tofile(os.path.join(output_path, "segmented_filtered_rescaled_afm_data_16bit_512x512.raw"))
 
     create_overlay_figure(data, segmented_data, label_stats, "sample0001", output_path)
     create_axis_figure(data, label_stats, "sample0001", output_path)
