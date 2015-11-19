@@ -1,10 +1,6 @@
-# afm-particle-analysis
-The particle analysis for Actomic Force Microscope images
-
-# Example of config file
 paths: &PATHS
-    input_path: '/input/path'
-    output_path: '/output/path/result'
+    input_path: '/Users/rshkarin/Documents/AllaData'
+    output_path: '/Users/rshkarin/Documents/AllaData/Results'
 
 samples:
   - filename: 'data.000'

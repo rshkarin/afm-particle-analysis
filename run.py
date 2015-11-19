@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-import platform
+import argparse
 import os
 import sys
 import colorsys
 import nanoscope
+import yaml
+import logging
 from random import random
 import numpy as np
 import pandas as pd
@@ -23,7 +25,13 @@ from skimage.morphology import watershed, disk
 from skimage.segmentation import random_walker
 from skimage.color import label2rgb
 
-term_enc = 'utf-8' if platform.uname()[0] == 'Linux' else 'cp1251'
+log = logging.getLogger()
+log.setLevel(logging.DEBUG)
+
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(logging.DEBUG)
+log.addHandler(ch)
+
 matplotlib.style.use('ggplot')
 
 AXES_NAMES = {
@@ -169,18 +177,18 @@ def process_stats(particles_stats, pixel_scale_factor=0.512):
 
     return particles_stats_scaled, particles_stats_scaled.columns.values
 
-def segment_data(data, min_distance=5, footprint=disk(10), indices=False):
+def segment_data(data, min_distance=5, footprint=disk(10), max_filt_footprint=disk(5), indices=False):
     th_val = filters.threshold_otsu(data)
     thresholded_particles = data > th_val
     distance = ndi.distance_transform_edt(thresholded_particles)
-    distance = ndi.maximum_filter(distance, footprint=disk(5), mode='nearest')
+    distance = ndi.maximum_filter(distance, footprint=max_filt_footprint, mode='nearest')
     local_maxi = peak_local_max(distance, min_distance=min_distance, indices=indices, footprint=footprint, labels=thresholded_particles)
     labeled_data, num_features = ndi.measurements.label(local_maxi)
     segmented_data = watershed(-distance, labeled_data, mask=thresholded_particles)
 
     return segmented_data, local_maxi
 
-def preprocess_data(data, small_particle=5, large_particle=15):
+def preprocess_data(data, small_particle=5, large_particle=15, min_exposure=5, max_exposure=95):
     height, width = data.shape
     pad_height, pad_width = next_length_pow2(height + 1), next_length_pow2(width + 1)
 
@@ -199,7 +207,7 @@ def preprocess_data(data, small_particle=5, large_particle=15):
     ifft_data = np.fft.ifft2(filtered_fft_data)
     filtered_data = ifft_data.real[crop_bbox].astype(np.float32)
 
-    p1, p2 = np.percentile(filtered_data, (5, 95))
+    p1, p2 = np.percentile(filtered_data, (min_exposure, max_exposure))
     filtered_rescaled_data = exposure.rescale_intensity(filtered_data, in_range=(p1, p2))
 
     return filtered_rescaled_data
@@ -210,7 +218,7 @@ def create_histogram_figure(stats, output_path, column='avg_axis', range=[], col
 
     filtered_data = stats[column]
 
-    if len(range):
+    if len(range) and sum(range) != 0:
        filtered_data = stats[column][(stats[column] >= np.min(range)) & \
                                        (stats[column] <= np.max(range))]
     fig, ax = plt.subplots()
@@ -221,14 +229,11 @@ def create_histogram_figure(stats, output_path, column='avg_axis', range=[], col
     plt.xlabel(AXES_NAMES[column][language])
     plt.ylabel(AXES_NAMES['frequency'][language])
     plt.savefig(os.path.join(output_path, base_filename + '_' + column + filename_suffix), bbox_inches='tight')
-    plt.show()
-
-def create_figures(particles_stats):
-    pass
+    #plt.show()
 
 def create_overlay_figure(data, data_mask, label_stats, filename, output_path, base_filename='label_overlay', filename_suffix='.png', figsize=(8,8)):
     if not len(label_stats.index):
-        print 'No data stats collected.'
+        log.critical('No data stats collected.')
         sys.exit(1)
 
     fig = plt.figure(figsize=figsize)
@@ -239,8 +244,7 @@ def create_overlay_figure(data, data_mask, label_stats, filename, output_path, b
     ax.set_axis_off()
     ax.imshow(data_mask, alpha=0.3, cmap=_get_colors(len(label_stats.index)), interpolation='bicubic')
     plt.savefig(os.path.join(output_path, '_'.join([filename, base_filename]) + filename_suffix), bbox_inches='tight')
-
-    plt.show()
+    #plt.show()
 
 def create_axis_figure(data, label_stats, filename, output_path, base_filename='axis', file_ext='.png', figsize=(8,8)):
     fig = plt.figure(figsize=figsize)
@@ -266,26 +270,92 @@ def create_axis_figure(data, label_stats, filename, output_path, base_filename='
         ax.add_patch(approx_particle)
 
     plt.savefig(os.path.join(output_path, '_'.join([filename, base_filename]) + file_ext), bbox_inches='tight')
-    plt.show()
+    #plt.show()
+
+def process_sample(sample):
+    log.info("### %s is being processed... ###" % sample['name'])
+    afm_image = nanoscope.read(os.path.join(sample['input_path'], sample['filename']))
+    data = afm_image.height.data
+    properties=['label','area','centroid','equivalent_diameter', \
+                'major_axis_length','minor_axis_length','orientation','bbox']
+
+    if not os.path.exists(sample['output_path']):
+        os.makedirs(sample['output_path'])
+
+    log.info("----- Data preprocessing...")
+    processed_data = preprocess_data(data, \
+                        small_particle=sample['bp_filter']['min'], \
+                        large_particle=sample['bp_filter']['max'], \
+                        min_exposure=sample['intensity_scale']['min'], \
+                        max_exposure=sample['intensity_scale']['max'])
+
+    log.info("----- Segmenting...")
+    segmented_data, local_maxi = segment_data(processed_data, \
+                                    min_distance=sample['segmentation']['min_dist'], \
+                                    footprint=disk(sample['segmentation']['peak_footprint']), \
+                                    max_filt_footprint=disk(sample['segmentation']['filter_footprint']))
+
+    log.info("----- Collecting particle statistics...")
+    label_stats = particles_stats(segmented_data, properties)
+
+    log.info("----- Processing of particle statistics...")
+    processed_stats, columns = process_stats(label_stats, pixel_scale_factor=sample['pixel_scale'])
+
+    log.info("----- Overlay image creation...")
+    create_overlay_figure(data, segmented_data, label_stats, sample['name'], sample['output_path'])
+
+    log.info("----- Particle's axes image creation...")
+    create_axis_figure(data, label_stats, sample['name'], sample['output_path'])
+
+    log.info("----- Histogram plotting...")
+    create_histogram_figure(processed_stats, \
+                            sample['output_path'], \
+                            color=sample['histogram']['color'], \
+                            range=sample['histogram']['range'], \
+                            bins=sample['histogram']['bins'], \
+                            language=sample['histogram']['lang'], \
+                            figsize=tuple(sample['histogram']['figsize']))
 
 def main():
-    root_folder_path = "/Users/rshkarin/Documents/AllaData"
-    afm_image = nanoscope.read(os.path.join(root_folder_path, 'data.000'))
-    data = afm_image.height.data
-    # data_path = os.path.join(root_folder_path, "afm_data_16bit_512x512.raw")
-    # data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
-    properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation','bbox']
+    parser = argparse.ArgumentParser()
+    parser.add_argument("param", help="path to file of samples' parameters (e.g. param.yaml)")
+    args = parser.parse_args()
 
-    processed_data = preprocess_data(data)
-    segmented_data, local_maxi = segment_data(processed_data)
-    label_stats = particles_stats(segmented_data, properties)
-    processed_stats, columns = process_stats(label_stats)
+    if args.param:
+        try:
+            with open(args.param, 'r') as f:
+                config = yaml.load(f)
+                try:
+                    samples = config['samples']
 
-    output_path = root_folder_path
+                    for sample in samples:
+                        process_sample(sample)
 
-    create_overlay_figure(data, segmented_data, label_stats, "sample0001", output_path)
-    create_axis_figure(data, label_stats, "sample0001", output_path)
-    create_histogram_figure(processed_stats, output_path, range=range(10,400), bins=20, language='en')
+                except KeyError:
+                    print "No samples in configuration file."
+                    sys.exit(1)
+        except IOError:
+            print "Can't open %s" % args.param
+            sys.exit(1)
+
+# def main():
+#     root_folder_path = "/Users/rshkarin/Documents/AllaData"
+#     afm_image = nanoscope.read(os.path.join(root_folder_path, 'data.000'))
+#     data = afm_image.height.data
+#     # data_path = os.path.join(root_folder_path, "afm_data_16bit_512x512.raw")
+#     # data = np.memmap(data_path, dtype=np.int16, shape=(512,512), mode='r')
+#     properties=['label','area','centroid','equivalent_diameter','major_axis_length','minor_axis_length','orientation','bbox']
+#
+#     processed_data = preprocess_data(data)
+#     segmented_data, local_maxi = segment_data(processed_data)
+#     label_stats = particles_stats(segmented_data, properties)
+#     processed_stats, columns = process_stats(label_stats)
+#
+#     output_path = root_folder_path
+#
+#     create_overlay_figure(data, segmented_data, label_stats, "sample0001", output_path)
+#     create_axis_figure(data, label_stats, "sample0001", output_path)
+#     create_histogram_figure(processed_stats, output_path, range=range(10,400), bins=20, language='en')
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
