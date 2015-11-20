@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import colormaps as cmps
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.patches import Circle
 from scipy import ndimage as ndi
