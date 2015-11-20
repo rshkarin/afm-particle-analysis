@@ -2,7 +2,6 @@
 import argparse
 import os
 import sys
-import colorsys
 import nanoscope
 import yaml
 import logging
@@ -12,18 +11,14 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import colormaps as cmaps
 from matplotlib.ticker import FormatStrFormatter
-from matplotlib.patches import Ellipse, Circle
+from matplotlib.patches import Circle
 from scipy import ndimage as ndi
-from scipy.misc import imsave
 from skimage import exposure
 from skimage import filters
 from skimage import measure
 from skimage.feature import peak_local_max
 from skimage.morphology import watershed, disk
-from skimage.segmentation import random_walker
-from skimage.color import label2rgb
 
 log = logging.getLogger()
 log.setLevel(logging.DEBUG)
