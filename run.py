@@ -284,13 +284,13 @@ def create_overlay_figure(data, data_mask, label_stats, filename, \
     fig = plt.figure(figsize=figsize)
     ax = fig.add_axes([.0, .0, 1.0, 1.0])
     ax.imshow(data, cmap=cm.gray, interpolation='bicubic')
-    ax.autoscale(False)
-    ax.set_adjustable('box-forced')
-    ax.set_axis_off()
+    plt.axis('off')
+    fig.axes[0].get_xaxis().set_visible(False)
+    fig.axes[0].get_yaxis().set_visible(False)
     ax.imshow(data_mask, alpha=0.3, cmap=_get_colors(len(label_stats.index)), \
               interpolation='bicubic')
     plt.savefig(os.path.join(output_path, '_'.join([filename, base_filename]) + \
-                filename_suffix), bbox_inches='tight')
+                filename_suffix), bbox_inches='tight', pad_inches=0)
     if verbose:
         plt.show()
 
@@ -299,10 +299,7 @@ def create_axis_figure(data, label_stats, filename, output_path, \
                        verbose=False):
     fig = plt.figure(figsize=figsize)
     ax = fig.add_axes([.0, .0, 1.0, 1.0])
-    ax.imshow(data, cmap=cm.gray)
-    ax.autoscale(False)
-    ax.set_adjustable('box-forced')
-    ax.set_axis_off()
+    ax.imshow(data, cmap=cm.gray, interpolation='bicubic')
 
     for index, row in label_stats.iterrows():
         y0, x0 = row.centroid
@@ -323,9 +320,18 @@ def create_axis_figure(data, label_stats, filename, output_path, \
                                  fill=False)
         ax.add_patch(approx_particle)
 
+    plt.axis('off')
+
+    for axis in fig.axes:
+        axis.autoscale_view('tight')
+        axis.set_xlim(0, data.shape[1])
+        axis.set_ylim(0, data.shape[0])
+        axis.get_xaxis().set_visible(False)
+        axis.get_yaxis().set_visible(False)
+
     plt.savefig(os.path.join(output_path, \
                              '_'.join([filename, base_filename]) + file_ext), \
-                             bbox_inches='tight')
+                             bbox_inches='tight', pad_inches=0)
     if verbose:
         plt.show()
 
